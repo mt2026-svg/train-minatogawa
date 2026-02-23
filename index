@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>神鉄ALERT - 湊川駅 リアルタイム</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Archivo+Narrow:wght@700&display=swap" rel="stylesheet">
+    <style>
+        :root { --shintetsu-red: #e60012; }
+        body { font-family: 'Helvetica Neue', Arial, sans-serif; transition: all 0.4s; overflow: hidden; margin: 0; }
+        .condensed-font { font-family: 'Archivo Narrow', sans-serif; transform: scaleX(0.85); letter-spacing: -0.02em; display: flex; align-items: baseline; justify-content: center; }
+        .zebra-pattern { background: linear-gradient(45deg, #FFD700 25%, #000 25%, #000 50%, #FFD700 50%, #FFD700 75%, #000 75%, #000); background-size: 40px 40px; }
+        .train-card { cursor: pointer; transition: all 0.2s; border: 1px solid #eee; }
+        .selected-train { border: 2.5px solid var(--shintetsu-red) !important; background-color: white !important; opacity: 1 !important; transform: scale(1.02); z-index: 10; box-shadow: 0 4px 15px rgba(230,0,18,0.15); }
+        .active-day { background-color: var(--shintetsu-red) !important; color: white !important; }
+    </style>
+</head>
+<body class="bg-white text-black">
+
+    <div id="app" class="h-screen flex flex-col relative pb-[80px]">
+        <div class="bg-gray-100 p-2 flex items-center justify-between border-b">
+            <div class="flex items-center gap-1 font-bold text-red-600 text-sm">
+                <i data-lucide="map-pin" class="w-4 h-4"></i> 湊川
+            </div>
+            
+            <div class="flex bg-gray-200 rounded-lg p-0.5 text-[10px] font-bold">
+                <button id="btn-weekday" onclick="setDayType('weekday')" class="px-3 py-1 rounded-md active-day">平日</button>
+                <button id="btn-holiday" onclick="setDayType('holiday')" class="px-3 py-1 rounded-md">土休日</button>
+            </div>
+            
+            <div id="current-clock" class="font-mono font-bold text-gray-500 text-xs">00:00:00</div>
+        </div>
+
+        <div id="top-zebra" class="h-6 w-full zebra-pattern opacity-0 transition-opacity duration-500"></div>
+
+        <div class="flex-grow flex flex-col items-center justify-center px-4 text-center">
+            <h1 class="text-2xl font-black mb-0.5 opacity-30 italic">湊川 駅</h1>
+            
+            <div class="flex items-baseline gap-2 justify-center">
+                <div id="train-type-label" class="text-2xl font-black italic tracking-tighter transition-all">---</div>
+                <div id="train-dest-label" class="text-xl font-bold">--- 行き</div>
+            </div>
+            
+            <p id="warning-text" class="text-lg font-bold mb-1 tracking-[0.4em] hidden text-red-600">警告：急いでください</p>
+            <p id="timer-label" class="text-xs font-bold tracking-[0.4em] text-gray-400 mt-4 mb-[-10px]">発車まで あと</p>
+
+            <div id="timer-display" class="condensed-font text-[90px] sm:text-[110px] leading-none font-bold transition-colors">
+                <span id="min">00</span><span class="mx-1 text-[30px]">分</span>
+                <span id="sec">00</span><span class="mx-1 text-[30px]">秒</span>
+                <span id="ms" class="text-[40px] ml-1">00</span>
+            </div>
+            <div class="mt-2 px-10 py-1.5 rounded-full text-xs font-bold text-white shadow-md bg-[#e60012]">鈴蘭台・三田・粟生 方面</div>
+
+            <div class="mt-8 flex flex-col gap-2 w-full max-w-[340px]" id="train-list"></div>
+        </div>
+        <div id="bottom-zebra" class="h-8 w-full zebra-pattern opacity-0 transition-opacity duration-500"></div>
+    </div>
+
+    <div id="ad-container" class="fixed bottom-0 left-0 w-full h-[80px] bg-white flex items-center p-3 border-t-2 border-gray-100 z-50">
+        <div class="w-12 h-12 rounded-lg flex items-center justify-center text-white mr-3 bg-green-600">
+            <i data-lucide="store"></i>
+        </div>
+        <div class="flex-grow text-left">
+            <p class="text-[9px] font-bold text-green-700">湊川公園・商店街 情報</p>
+            <p class="text-xs font-bold leading-tight" id="ad-text">神戸の台所・湊川商店街でお買い物！<br>美味しい惣菜や新鮮な食材が豊富。</p>
+        </div>
+        <button class="bg-green-600 text-white px-3 py-2 rounded-lg text-[10px] font-bold shadow-sm">MAP</button>
+    </div>
+
+    <script>
+        // 湊川駅 鈴蘭台方面 ダイヤ（平日・日中パターン）
+        const weekdaySchedule = [];
+        const dests = ["三田", "粟生", "有馬温泉", "三木", "西鈴蘭台"];
+        for(let h=5; h<=23; h++) {
+            weekdaySchedule.push({h, m: 3, type: "普通", dest: "三田", color: "#333"});
+            weekdaySchedule.push({h, m: 10, type: "準急", dest: "粟生", color: "#448833"});
+            weekdaySchedule.push({h, m: 18, type: "普通", dest: "西鈴蘭台", color: "#333"});
+            weekdaySchedule.push({h, m: 25, type: "急行", dest: "三田", color: "#f39700"});
+            weekdaySchedule.push({h, m: 33, type: "普通", dest: "有馬温泉", color: "#333"});
+            weekdaySchedule.push({h, m: 40, type: "準急", dest: "三木", color: "#448833"});
+            weekdaySchedule.push({h, m: 48, type: "普通", dest: "三田", color: "#333"});
+            weekdaySchedule.push({h, m: 55, type: "普通", dest: "西鈴蘭台", color: "#333"});
+        }
+
+        const holidaySchedule = [];
+        for(let h=5; h<=23; h++) {
+            holidaySchedule.push({h, m: 0, type: "普通", dest: "三田", color: "#333"});
+            holidaySchedule.push({h, m: 15, type: "準急", dest: "粟生", color: "#448833"});
+            holidaySchedule.push({h, m: 30, type: "普通", dest: "三田", color: "#333"});
+            holidaySchedule.push({h, m: 45, type: "準急", dest: "三木", color: "#448833"});
+        }
+
+        let currentMode = 'weekday';
+        let selectedTrainIdx = 0;
+        let upcomingTrains = [];
+
+        function setDayType(type) {
+            currentMode = type;
+            document.getElementById('btn-weekday').classList.toggle('active-day', type === 'weekday');
+            document.getElementById('btn-holiday').classList.toggle('active-day', type === 'holiday');
+            updateTimetable();
+        }
+
+        function updateTimetable() {
+            const now = new Date();
+            const currentTotalSeconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+            const activeSchedule = currentMode === 'weekday' ? weekdaySchedule : holidaySchedule;
+            
+            upcomingTrains = activeSchedule.filter(t => (t.h * 3600 + t.m * 60) > currentTotalSeconds).slice(0, 3);
+            
+            const listContainer = document.getElementById('train-list');
+            const labels = ["次便", "次々便", "次々々便"];
+            listContainer.innerHTML = upcomingTrains.map((t, idx) => `
+                <div onclick="selectedTrainIdx=${idx}" class="train-card flex justify-between items-center bg-gray-50 px-4 py-3 rounded-xl border-l-4 ${idx===selectedTrainIdx?'selected-train':'opacity-40'}" style="border-left-color: ${t.color}">
+                    <div class="flex flex-col items-start text-left">
+                        <span class="text-[9px] font-bold text-gray-400">${labels[idx]}</span>
+                        <div class="flex items-center gap-1">
+                            <span class="font-black text-sm" style="color:${t.color}">${t.type}</span>
+                            <span class="text-xs font-bold text-gray-600">${t.dest}</span>
+                        </div>
+                    </div>
+                    <span class="font-bold text-lg">${String(t.h).padStart(2,'0')}:${String(t.m).padStart(2,'0')}<span class="text-xs ml-0.5">発</span></span>
+                </div>
+            `).join('');
+        }
+
+        function updateDisplay() {
+            const now = new Date();
+            document.getElementById('current-clock').innerText = now.toLocaleTimeString();
+
+            if (upcomingTrains.length === 0) return;
+            
+            const target = upcomingTrains[selectedTrainIdx];
+            const targetDate = new Date();
+            targetDate.setHours(target.h, target.m, 0, 0);
+            
+            const diff = targetDate - now;
+            const m = Math.max(0, Math.floor(diff / 60000));
+            const s = Math.max(0, Math.floor((diff % 60000) / 1000));
+            const ms = Math.max(0, Math.floor((diff % 1000) / 10));
+
+            document.getElementById('min').innerText = String(m).padStart(2, '0');
+            document.getElementById('sec').innerText = String(s).padStart(2, '0');
+            document.getElementById('ms').innerText = String(ms).padStart(2, '0');
+            document.getElementById('train-type-label').innerText = target.type;
+            document.getElementById('train-type-label').style.color = target.color;
+            document.getElementById('train-dest-label').innerText = target.dest + " 行き";
+
+            const body = document.body;
+            const topZ = document.getElementById('top-zebra');
+            const botZ = document.getElementById('bottom-zebra');
+            const warn = document.getElementById('warning-text');
+            const timer = document.getElementById('timer-display');
+            const timerLabel = document.getElementById('timer-label');
+
+            if (m < 1) {
+                body.className = "bg-black text-white";
+                topZ.style.opacity = "1"; botZ.style.opacity = "1";
+                warn.classList.remove('hidden'); timer.style.color = "white"; timerLabel.style.color = "white";
+            } else if (m < 3) {
+                body.className = "bg-[#FFD700] text-black";
+                topZ.style.opacity = "1"; botZ.style.opacity = "1";
+                warn.classList.remove('hidden'); timer.style.color = "black"; timerLabel.style.color = "black";
+            } else {
+                body.className = "bg-white text-black";
+                topZ.style.opacity = "0"; botZ.style.opacity = "0";
+                warn.classList.add('hidden'); timerLabel.style.color = "#9ca3af";
+                timer.style.color = target.color;
+            }
+
+            if (diff <= -1000) updateTimetable(); 
+        }
+
+        setInterval(updateDisplay, 50);
+        updateTimetable();
+        lucide.createIcons();
+    </script>
+</body>
+</html>
